@@ -1,5 +1,6 @@
 from datetime import date
-from flask import Flask, render_template, redirect, url_for, flash, request
+from functools import wraps
+from flask import Flask, render_template, redirect, url_for, flash, request, abort
 from flask_bootstrap import Bootstrap
 from flask_ckeditor import CKEditor
 from datetime import date
@@ -50,6 +51,16 @@ class User(db.Model, UserMixin):
 db.create_all()
 
 
+def admin_only(function):
+    @wraps(function)
+    def deco_function(*args, **kwargs):
+        if current_user.id != 2:
+            flash("requires admin privileges")
+            return abort(403)
+        return function(*args, **kwargs)
+    return deco_function
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(user_id)
@@ -70,7 +81,7 @@ def register():
             encrypted_password = generate_password_hash(form.password.data, method='pbkdf2:sha256', salt_length=8)
             new_user = User()
             new_user.email = form.email.data
-            new_user.name = form.email.data
+            new_user.name = form.name.data
             new_user.password = encrypted_password
 
             db.session.add(new_user)
@@ -83,7 +94,7 @@ def register():
             return redirect(url_for('login'))
         else:
             flash("un-matching passwords")
-    return render_template("register.html", form=form)
+    return render_template("register.html", form=form, logged_in=current_user.is_authenticated)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -96,7 +107,7 @@ def login():
             user_valid = User.query.filter_by(email=form.email.data).first()
             if user_valid and check_password_hash(user_valid.password, form.password.data):
                 login_user(user_valid)
-                return redirect(url_for('get_all_posts'))
+                return redirect(url_for('get_all_posts', logged_in=current_user.is_authenticated))
             
             # redirect to register page if the user email is invalid
             elif not user_valid:
@@ -183,11 +194,12 @@ def edit_post(post_id):
 
 @app.route("/delete/<int:post_id>")
 @login_required
+@admin_only
 def delete_post(post_id):
     post_to_delete = BlogPost.query.get(post_id)
     db.session.delete(post_to_delete)
     db.session.commit()
-    return redirect(url_for('get_all_posts'))
+    return redirect(url_for('get_all_posts', logged_in=current_user.is_authenticated))
 
 
 if __name__ == "__main__":
