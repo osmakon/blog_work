@@ -58,7 +58,7 @@ def load_user(user_id):
 @app.route('/')
 def get_all_posts():
     posts = BlogPost.query.all()
-    return render_template("index.html", all_posts=posts)
+    return render_template("index.html", all_posts=posts, logged_in=current_user.is_authenticated)
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -77,12 +77,12 @@ def register():
             db.session.commit()
 
             flash("successfully signed up")
-            return redirect(url_for('get_all_posts'))
+            return redirect(url_for('get_all_posts', logged_in=current_user.is_authenticated))
         elif email_query:
             flash("email already in use; sign in instead")
             return redirect(url_for('login'))
         else:
-            flash("un matching passwords")
+            flash("un-matching passwords")
     return render_template("register.html", form=form)
 
 
@@ -92,29 +92,32 @@ def login():
     form = LoginForm()
     if request.method == 'POST':
         if form.validate_on_submit():
+            # check to see the user already exists on the database
             user_valid = User.query.filter_by(email=form.email.data).first()
             if user_valid and check_password_hash(user_valid.password, form.password.data):
                 login_user(user_valid)
                 return redirect(url_for('get_all_posts'))
+            
+            # redirect to register page if the user email is invalid
             elif not user_valid:
                 error = 'invalid email, sign up instead?'
                 return redirect(url_for('register', error=error))
             else:
                 error = 'invalid username or password'
                 return render_template('login.html', error=error, form=form)
-    return render_template("login.html", form=form)
+    return render_template("login.html", form=form, error=error)
 
 
 @app.route('/logout')
 def logout():
     logout_user()
-    return redirect(url_for('get_all_posts'))
+    return redirect(url_for('get_all_posts', logged_in=current_user.is_authenticated))
 
 
 @app.route("/post/<int:post_id>")
 def show_post(post_id):
     requested_post = BlogPost.query.get(post_id)
-    return render_template("post.html", post=requested_post)
+    return render_template("post.html", post=requested_post, logged_in=current_user.is_authenticated)
 
 
 @app.route("/about")
@@ -127,50 +130,59 @@ def contact():
     return render_template("contact.html")
 
 
-@app.route("/new-post")
-@login_required
+@app.route("/new-post", methods=['GET', 'POST'])
+# @login_required
 def add_new_post():
     form = CreatePostForm()
-    if form.validate_on_submit():
-        new_post = BlogPost()
+    print(current_user.is_authenticated)
+    if (request.method == 'GET') and (not current_user.is_authenticated):
+        flash('you need to login first')
+        return redirect(url_for('login'))
+    if form.validate_on_submit() and current_user.is_authenticated:
+        if request.method == 'POST':
+            new_post = BlogPost()
 
-        new_post.title = form.title.data
-        new_post.subtitle = form.subtitle.data
-        new_post.body = form.body.data
-        new_post.img_url = form.img_url.data
-        new_post.author = current_user
-        new_post.date = date.today().strftime("%B %d, %Y")
+            new_post.title = form.title.data
+            new_post.subtitle = form.subtitle.data
+            new_post.body = form.body.data
+            new_post.img_url = form.img_url.data
+            new_post.author = current_user.name
+            new_post.date = date.today().strftime("%B %d, %Y")
 
-        db.session.add(new_post)
-        db.session.commit()
-        return redirect(url_for("get_all_posts"))
-    return render_template("make-post.html", form=form)
+            db.session.add(new_post)
+            db.session.commit()
+            return redirect(url_for("get_all_posts", logged_in=True))
+    return render_template("make-post.html", form=form, logged_in=current_user.is_authenticated)
 
 
-@app.route("/edit-post/<int:post_id>")
-@login_required
+@app.route("/edit-post/<int:post_id>", methods=['GET', 'POST'])
+# @login_required
 def edit_post(post_id):
     post = BlogPost.query.get(post_id)
     edit_form = CreatePostForm(
         title=post.title,
         subtitle=post.subtitle,
         img_url=post.img_url,
-        author=post.author,
         body=post.body
     )
-    if edit_form.validate_on_submit():
-        post.title = edit_form.title.data
-        post.subtitle = edit_form.subtitle.data
-        post.img_url = edit_form.img_url.data
-        post.author = edit_form.author.data
-        post.body = edit_form.body.data
-        db.session.commit()
-        return redirect(url_for("show_post", post_id=post.id))
 
-    return render_template("make-post.html", form=edit_form)
+    if (request.method == 'GET') and (not current_user.is_authenticated):
+        flash('you need to log in first')
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        if edit_form.validate_on_submit():
+            post.title = edit_form.title.data
+            post.subtitle = edit_form.subtitle.data
+            post.img_url = edit_form.img_url.data
+            post.author = current_user.name
+            post.body = edit_form.body.data
+            db.session.commit()
+            return redirect(url_for("show_post", post_id=post.id, logged_in=current_user.is_authenticated))
+    return render_template("make-post.html", form=edit_form, post_id=post.id, logged_in=current_user.is_authenticated)
 
 
 @app.route("/delete/<int:post_id>")
+@login_required
 def delete_post(post_id):
     post_to_delete = BlogPost.query.get(post_id)
     db.session.delete(post_to_delete)
