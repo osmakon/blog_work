@@ -4,9 +4,12 @@ from flask import Flask, render_template, redirect, url_for, flash, request, abo
 from flask_bootstrap import Bootstrap
 from flask_ckeditor import CKEditor
 from datetime import date
+
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import ForeignKey
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.declarative import declarative_base
 from flask_login import UserMixin, login_user, LoginManager, login_required, current_user, logout_user
 from forms import CreatePostForm, CreateUser, LoginForm
 from flask_gravatar import Gravatar
@@ -25,27 +28,31 @@ login_manager.init_app(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///blog.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+Base = declarative_base()
 
 
 # CONFIGURE TABLES
 
-class BlogPost(db.Model):
+class BlogPost(db.Model, Base):
     __tablename__ = "blog_posts"
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, ForeignKey('users.id'))
     author = db.Column(db.String(250), nullable=False)
     title = db.Column(db.String(250), unique=True, nullable=False)
     subtitle = db.Column(db.String(250), nullable=False)
     date = db.Column(db.String(250), nullable=False)
     body = db.Column(db.Text, nullable=False)
     img_url = db.Column(db.String(250), nullable=False)
+    author_id = relationship('User', back_populates='posts')
 
 
-class User(db.Model, UserMixin):
+class User(db.Model, UserMixin, Base):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True, nullable=False)
     name = db.Column(db.String(250), nullable=False)
     email = db.Column(db.String(250), unique=True, nullable=False)
     password = db.Column(db.String(250), nullable=False)
+    posts = relationship('BlogPost', back_populates='author_id')
 
 
 db.create_all()
@@ -58,6 +65,7 @@ def admin_only(function):
             flash("requires admin privileges")
             return abort(403)
         return function(*args, **kwargs)
+
     return deco_function
 
 
@@ -108,7 +116,7 @@ def login():
             if user_valid and check_password_hash(user_valid.password, form.password.data):
                 login_user(user_valid)
                 return redirect(url_for('get_all_posts', logged_in=current_user.is_authenticated))
-            
+
             # redirect to register page if the user email is invalid
             elif not user_valid:
                 error = 'invalid email, sign up instead?'
@@ -159,8 +167,11 @@ def add_new_post():
             new_post.img_url = form.img_url.data
             new_post.author = current_user.name
             new_post.date = date.today().strftime("%B %d, %Y")
-
+            # add the new post to the blogs database
             db.session.add(new_post)
+            # append post to the post attribute in class user for the one-to-many relationship
+            current_user.posts.append(new_post)
+            # commit changes to the database to create the corresponding user id on blog post table
             db.session.commit()
             return redirect(url_for("get_all_posts", logged_in=True))
     return render_template("make-post.html", form=form, logged_in=current_user.is_authenticated)
